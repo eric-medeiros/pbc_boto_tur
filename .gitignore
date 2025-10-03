@@ -1,10 +1,26 @@
-.Rproj.user
+# History files
 .Rhistory
+.Rapp.history
+
+# Session Data files
 .RData
+.RDataTmp
+
+# User-specific files
 .Ruserdata
 
-02_results/*
-.Rdata
-.httr-oauth
-.DS_Store
-.quarto
+# RStudio files
+.Rproj.user/
+
+# Temporary files created by R markdown
+*.utf8.md
+*.knit.md
+
+# R Environment Variables
+.Renviron
+
+# Output files
+02_outputs/*
+
+ Arquivos html
+*.html
