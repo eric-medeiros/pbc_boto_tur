@@ -60,8 +60,8 @@ limiar_95 <- calcular_limiar(dens_raster, 0.95)
 mascara_50 <- classify(dens_raster, cbind(-Inf, limiar_50, NA))
 mascara_95 <- classify(dens_raster, cbind(-Inf, limiar_95, NA))
 
-p50 <- as.polygons(mascara_50, dissolve = TRUE) |> st_as_sf()
-p95 <- as.polygons(mascara_95, dissolve = TRUE) |> st_as_sf()
+p50 <- as.polygons(mascara_50, dissolve = TRUE) %>% st_as_sf()
+p95 <- as.polygons(mascara_95, dissolve = TRUE) %>% st_as_sf()
 
 # ---- Exporta ----
 st_write(pontos, caminho_pontos, delete_dsn = TRUE)
