@@ -1,0 +1,228 @@
+---
+title: "ROTAS DO ESTOURO - BOTOS DOS CAMPO"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: yeti
+---
+
+```{r setup, include=FALSE}
+library(here)
+library(flexdashboard)
+library(leaflet)
+library(sf)
+library(raster)
+library(htmltools)
+library(dplyr)
+library(lubridate)
+
+pasta_output_botos_campos <- here("02_outputs", "botos_campos")
+pasta_output_turistas_estouro <- here("02_outputs", "turistas_estouro")
+
+# Listar todos os indivíduos (pastas)
+caminhos <- list.dirs(pasta_output_botos_campos, full.names = TRUE, recursive = FALSE)
+
+caminho <- caminhos[[1]]
+
+# Função para carregar dados de um indivíduo
+carregar_geo <- function(caminho_base) {
+
+  # Carregar dados
+  pontos <- tryCatch(st_read(here(caminho_base, "pontos.gpkg"), quiet = TRUE), error = function(e) NULL)
+  trajetos <- tryCatch(st_read(here(caminho_base, "trajetos.gpkg"), quiet = TRUE), error = function(e) NULL)
+  kernel <- tryCatch(raster(here(caminho_base, "kernel.tif")), error = function(e) NULL)
+  p50 <- tryCatch(st_read(here(caminho_base, "p50.gpkg"), quiet = TRUE), error = function(e) NULL)
+  p95 <- tryCatch(st_read(here(caminho_base, "p95.gpkg"), quiet = TRUE), error = function(e) NULL)
+  
+  # Transformar para WGS84 (4326) para o Leaflet
+  if (!is.null(pontos)) pontos <- st_transform(pontos, 4326)
+  if (!is.null(trajetos)) trajetos <- st_transform(trajetos, 4326)
+  if (!is.null(kernel)) kernel <- projectRaster(kernel, crs = crs("+init=epsg:4326"))
+  if (!is.null(p50)) p50 <- st_transform(p50, 4326)
+  if (!is.null(p95)) p95 <- st_transform(p95, 4326)
+  
+  list(
+    pontos = pontos,
+    trajetos = trajetos,
+    kernel = kernel,
+    p50 = p50,
+    p95 = p95
+  )
+}
+
+# Carregar todos os indivíduos
+dados_anos_boto <- list()
+for (caminho in caminhos) {
+  dados_anos_boto[[basename(caminho)]] <- carregar_geo(caminho)
+}
+
+dados_estouro <- carregar_geo(pasta_output_turistas_estouro)
+
+opacidade <- 0.4
+
+# Configurações de cores - cores distintas para cada indivíduo
+cores_anos <- list("#FF6B6B", "#5F27CD", "#55EFC4", "#EE5A24")
+
+```
+
+```{r}
+# Criar mapa base vazio
+mapa_base <- leaflet() %>%
+  addProviderTiles("CartoDB.Positron", group = "Light") %>%
+  addProviderTiles("Esri.WorldImagery", group = "Satélite") %>%
+  addScaleBar(position = "bottomleft")
+
+anos <- basename(caminhos)
+
+# Atribuir cores aos anos
+nomes_cores <- list()
+for (i in seq_along(anos)) {
+  nomes_cores[[anos[i]]] <- cores_anos[[i]]
+}
+
+# Adicionar cada ano ao mapa
+for (i in seq_along(anos)) {
+  ano <- anos[i]
+  cor_ano <- nomes_cores[[ano]]
+  dados <- dados_anos_boto[[ano]]
+  
+  if (!is.null(dados$pontos)) {
+    mapa_base <- mapa_base %>%
+      addCircleMarkers(data = dados$pontos,
+                       color = "black",
+                       fillColor = cor_ano,
+                       fillOpacity = 0.8,
+                       radius = 6,
+                       weight = 2,
+                       group = paste(ano, "- Pontos"),
+                       popup = ~paste0(
+                         "<strong>Ano: ", ano, "</strong><br>",
+                         "Data: ", data, "<br>",
+                         "Grupo: ", grupo, "<br>",
+                         "Coesão: ", coesao, " | Estado: ", estado, "<br>",
+                         "Tamanho grupo: ", ifelse(is.na(tam), "NA", tam), "<br>",
+                         "Adultos: ", ifelse(is.na(n_adultos), "NA", n_adultos),
+                         " | Juv: ", ifelse(is.na(n_juvenis), "NA", n_juvenis),
+                         " | Inf: ", ifelse(is.na(n_infantes),  "NA", n_infantes), "<br>",
+                         "Marcados: ", ifelse(is.na(n_marcados), "NA", n_marcados),
+                         " | Lisos: ", ifelse(is.na(n_lisos), "NA", n_lisos), "<br>",
+                         ifelse(!is.na(obs) & obs != "", paste0("Obs: ", obs), "")))
+  }  
+  
+  if (!is.null(dados$kernel)) {
+    mapa_base <- mapa_base %>%
+      addRasterImage(dados$kernel, 
+                     colors = "Reds",
+                     opacity = opacidade,
+                     group = paste(ano, "- Kernel"))
+  }
+  
+  if (!is.null(dados$trajetos)) {
+    mapa_base <- mapa_base %>%
+      addPolylines(data = dados$trajetos, 
+                   color = cor_ano,
+                   fillColor = cor_ano,
+                   fillOpacity = opacidade,
+                   weight = 2,
+                   group = paste(ano, "- Trajetos"),
+                   popup = paste(ano, "- Trajetos"))
+  }
+  
+  if (!is.null(dados$p50)) {
+    mapa_base <- mapa_base %>%
+      addPolygons(data = dados$p50,
+                  color = cor_ano,
+                  fillColor = cor_ano,
+                  fillOpacity = opacidade,
+                  weight = 2,
+                  group = paste(ano, "- P50"),
+                  popup = paste(ano, "- Percentil 50"))
+  }
+  
+  if (!is.null(dados$p95)) {
+    mapa_base <- mapa_base %>%
+      addPolygons(data = dados$p95,
+                  color = cor_ano,
+                  fillColor = cor_ano,
+                  fillOpacity = opacidade/2,
+                  weight = 1,
+                  group = paste(ano, "- P95"),
+                  popup = paste(ano, "- Percentil 95"))
+  }
+}
+
+mapa_base <- 
+  mapa_base %>%
+  addRasterImage(dados_estouro$kernel, 
+                 colors = "Reds",
+                 opacity = opacidade,
+                 group = "Estouro - Kernel dos trajetos") %>%
+  addCircleMarkers(data = dados_estouro$pontos,
+                   color = "black",
+                   fillColor = "black",
+                   fillOpacity = 0.8,
+                   radius = 6,
+                   weight = 2,
+                   group = "Estouro - Grupos",
+                   popup = ~paste0(
+                     "<strong>ID do turista: ", id_sub, "</strong><br>",
+                     "Destino: ", destino,"<br>",
+                     "Data: ",
+                     day(dados_estouro$pontos$data_hora), "/",
+                     month(dados_estouro$pontos$data_hora), "/",
+                     year(dados_estouro$pontos$data_hora), "<br>",
+                     "Hora: ", hour(dados_estouro$pontos$data_hora), ":",
+                     minute(dados_estouro$pontos$data_hora), ":",
+                     second(dados_estouro$pontos$data_hora), "<br>",
+                     "Quantidade: ", tipo_ponto)) %>%
+  addPolylines(data = dados_estouro$trajetos, 
+               color = "blue",
+               fillOpacity = opacidade,
+               weight = 2,
+               group = "Estouro - Trajetos") %>%
+  addPolygons(data = dados_estouro$p50,
+              color = "blue",
+              fillColor = "blue",
+              fillOpacity = opacidade,
+              weight = 2,
+              group = "Estouro - P50") %>%
+  addPolygons(data = dados_estouro$p95,
+              color = "blue",
+              fillColor = "blue",
+              fillOpacity = opacidade/2,
+              weight = 1,
+              group = "Estouro - P95")
+
+# Atualizar controle de layers com todos os grupos
+grupos_overlay <- c()
+for (i in seq_along(anos)) {
+  grupos_overlay <- c(grupos_overlay,
+                      paste(anos[i], "- Pontos"),
+                      paste(anos[i], "- Trajetos"),
+                      paste(anos[i], "- Kernel"), 
+                      paste(anos[i], "- P50"),
+                      paste(anos[i], "- P95"))
+}
+grupos_overlay <- c(grupos_overlay,
+                    "Estouro - Kernel dos trajetos",
+                    "Estouro - Grupos",
+                    "Estouro - Trajetos",
+                    "Estouro - P50",
+                    "Estouro - P95")
+
+mapa_base <- mapa_base %>%
+  addLayersControl(
+    baseGroups = c("Satélite", "Light"),
+    overlayGroups = grupos_overlay,
+    options = layersControlOptions(collapsed = FALSE)
+  ) %>%
+  hideGroup(grupos_overlay)
+```
+
+# Mapa
+```{r}
+mapa_base
+```
+
+
